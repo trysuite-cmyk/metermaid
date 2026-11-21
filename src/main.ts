@@ -10,9 +10,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { relaunch } from "@tauri-apps/plugin-process";
 import { load, type Store } from "@tauri-apps/plugin-store";
-import { check, type Update } from "@tauri-apps/plugin-updater";
 
 interface DeviceInfo {
 	// Host-qualified identity: the <option> value and the persisted settings key.
@@ -183,12 +181,6 @@ const errorCopy = $<HTMLButtonElement>("errorCopy");
 const errorDismiss = $<HTMLButtonElement>("errorDismiss");
 const resetHint = $<HTMLDivElement>("resetHint");
 const hintDismiss = $<HTMLButtonElement>("hintDismiss");
-const updateCheckBtn = $<HTMLButtonElement>("updateCheck");
-const updateBanner = $<HTMLDivElement>("updateBanner");
-const updateMessage = $<HTMLSpanElement>("updateMessage");
-const updateNotes = $<HTMLSpanElement>("updateNotes");
-const updateInstall = $<HTMLButtonElement>("updateInstall");
-const updateDismiss = $<HTMLButtonElement>("updateDismiss");
 const aboutModal = $<HTMLDivElement>("aboutModal");
 const aboutClose = $<HTMLButtonElement>("aboutClose");
 const aboutVersion = $<HTMLSpanElement>("aboutVersion");
@@ -341,95 +333,6 @@ function reportError(context: string, e: unknown) {
 	errorBanner.hidden = false;
 }
 
-// ---- Self-update (tauri-plugin-updater) ----------------------------------
-// On launch and on demand we ask GitHub Releases (via the `latest.json` the
-// release workflow publishes) whether a newer signed build exists. If so, a
-// banner offers a one-click download + relaunch. The download and minisign
-// verification happen in Rust; failures here are non-fatal — being offline, or
-// running a dev build with no newer published release, simply leaves the app
-// unchanged. `currentUpdate` holds the pending handle between check and install.
-let currentUpdate: Update | null = null;
-let updateInFlight = false;
-
-function showUpdateBanner(update: Update) {
-	updateMessage.textContent = `MeterMaid ${update.version} is available${
-		update.currentVersion ? ` (you have ${update.currentVersion})` : ""
-	}.`;
-	updateNotes.textContent = (update.body ?? "").trim();
-	updateNotes.hidden = updateNotes.textContent === "";
-	updateBanner.hidden = false;
-}
-
-// `manual` distinguishes the user clicking "Check for updates" (which deserves
-// visible feedback, including "up to date" and surfaced errors) from the silent
-// check on launch (which stays quiet unless an update is actually found).
-async function checkForUpdates(manual: boolean) {
-	if (updateInFlight) return;
-	if (manual) {
-		updateCheckBtn.disabled = true;
-		updateCheckBtn.textContent = "Checking…";
-	}
-	try {
-		const update = await check();
-		if (update) {
-			currentUpdate = update;
-			showUpdateBanner(update);
-		} else if (manual) {
-			// Brief inline confirmation; the toolbar status is reserved for capture.
-			updateCheckBtn.textContent = "Up to date";
-			setTimeout(() => {
-				updateCheckBtn.textContent = "Check for updates";
-			}, 2000);
-		}
-	} catch (e) {
-		if (manual) reportError("Check for updates", e);
-	} finally {
-		if (manual) {
-			updateCheckBtn.disabled = false;
-			if (updateCheckBtn.textContent === "Checking…") {
-				updateCheckBtn.textContent = "Check for updates";
-			}
-		}
-	}
-}
-
-async function installUpdate() {
-	if (!currentUpdate || updateInFlight) return;
-	updateInFlight = true;
-	updateInstall.disabled = true;
-	updateDismiss.disabled = true;
-	updateInstall.textContent = "Downloading…";
-	try {
-		let downloaded = 0;
-		let total = 0;
-		await currentUpdate.downloadAndInstall((event) => {
-			switch (event.event) {
-				case "Started":
-					total = event.data.contentLength ?? 0;
-					break;
-				case "Progress":
-					downloaded += event.data.chunkLength;
-					updateInstall.textContent = total
-						? `Downloading… ${Math.round((downloaded / total) * 100)}%`
-						: "Downloading…";
-					break;
-				case "Finished":
-					updateInstall.textContent = "Installing…";
-					break;
-			}
-		});
-		// On macOS/Linux the installed bundle is staged and we relaunch into it.
-		// (On Windows the NSIS installer takes over and exits the app itself.)
-		await relaunch();
-	} catch (e) {
-		reportError("Install update", e);
-		updateInFlight = false;
-		updateInstall.disabled = false;
-		updateDismiss.disabled = false;
-		updateInstall.textContent = "Install & Restart";
-	}
-}
-
 // ---- About dialog --------------------------------------------------------
 // A custom, centered in-app dialog opened from the macOS "About MeterMaid" menu
 // (via the `menu-about` event). Replaces the native panel so the text can be
@@ -470,7 +373,7 @@ function noteDeviceIssue(text: string) {
 function clearDeviceNotice() {
 	if (!deviceNotice) return;
 	deviceNotice = false;
-	if (!running && errorBanner.hidden) setStatus("stopped", "idle");
+	if (!running && errorBanner.hidden) setStatus("detenido", "idle");
 }
 
 function deviceSig(devices: DeviceInfo[]): string {
@@ -482,7 +385,7 @@ function deviceSig(devices: DeviceInfo[]): string {
 // is annotated too.
 function deviceLabel(d: DeviceInfo): string {
 	if (d.host === "asio") return `${d.name} (ASIO)`;
-	return d.isDefault ? `${d.name} (default)` : d.name;
+	return d.isDefault ? `${d.name} (predeterminado)` : d.name;
 }
 
 function setSettingsOpen(open: boolean) {
@@ -497,7 +400,7 @@ function renderDeviceOptions(devices: DeviceInfo[], keep: string) {
 	deviceSelect.innerHTML = "";
 	if (devices.length === 0) {
 		const opt = document.createElement("option");
-		opt.textContent = "No input devices found";
+		opt.textContent = "No se encontraron dispositivos de entrada";
 		opt.disabled = true;
 		deviceSelect.append(opt);
 		return;
@@ -535,13 +438,15 @@ async function loadDevices() {
 				savedDeviceAvailable = false;
 				pendingChannels = undefined;
 				pendingRate = undefined;
-				noteDeviceIssue("saved device unavailable — using default");
+				noteDeviceIssue(
+					"el dispositivo guardado no está disponible; se usará el predeterminado",
+				);
 			}
 			pendingDevice = undefined;
 		}
 		await refreshDeviceConfig();
 	} catch (e) {
-		reportError("List input devices", e);
+		reportError("Listar dispositivos de entrada", e);
 	}
 }
 
@@ -582,7 +487,10 @@ async function pollDevices() {
 		// The selection changed: the previously selected device went away (or the
 		// first device just appeared). Resync the channel/rate pickers, and tell
 		// the user when an active choice was dropped.
-		if (prev) noteDeviceIssue("input device disconnected — using default");
+		if (prev)
+			noteDeviceIssue(
+				"se desconectó el dispositivo de entrada; se usará el predeterminado",
+			);
 		else clearDeviceNotice();
 		await refreshDeviceConfig();
 	} else {
@@ -602,12 +510,12 @@ function populateChannels(count: number) {
 		channelSelect.append(opt);
 	};
 	for (let i = 0; i + 1 < count; i += 2) {
-		add(`Ch ${i + 1}–${i + 2}`, [i, i + 1]);
+		add(`Can. ${i + 1}–${i + 2}`, [i, i + 1]);
 	}
 	for (let i = 0; i < count; i++) {
-		add(`Ch ${i + 1} (mono)`, [i]);
+		add(`Can. ${i + 1} (mono)`, [i]);
 	}
-	if (count === 0) add("No channels", []);
+	if (count === 0) add("Sin canales", []);
 	channelSelect.selectedIndex = 0; // first stereo pair (Ch 1–2) when available
 }
 
@@ -650,7 +558,7 @@ async function refreshDeviceConfig() {
 			pendingRate = undefined;
 		}
 	} catch (e) {
-		reportError("Read device settings", e);
+		reportError("Leer ajustes del dispositivo", e);
 	}
 }
 
@@ -690,13 +598,13 @@ async function start() {
 		// windows open on one interface that is what tells them apart.
 		const mode =
 			channelSelect.selectedOptions[0]?.textContent ||
-			(info.channels === 1 ? "mono" : `${info.channels} ch`);
+			(info.channels === 1 ? "mono" : `${info.channels} canales`);
 		setStatus(`${info.sampleRate / 1000} kHz · ${mode}`, "ok");
 		hideError();
 		maybeShowResetHint();
 		requestFrame(); // start the render loop (it self-sustains while running)
 	} catch (e) {
-		reportError("Start capture", e);
+		reportError("Iniciar captura", e);
 	} finally {
 		capturePending = false;
 	}
@@ -745,10 +653,10 @@ async function stop() {
 		try {
 			await invoke("stop_capture");
 		} catch (e) {
-			reportError("Stop capture", e);
+			reportError("Detener captura", e);
 		}
 		teardownRunningUi();
-		setStatus("stopped", "idle");
+		setStatus("detenido", "idle");
 	} finally {
 		// Mirror start(): a throw in teardown must not latch capture off for
 		// the rest of the session, silently killing every later Start/Stop.
@@ -764,7 +672,7 @@ function handleStreamError(message: string) {
 	if (!running) return;
 	void invoke("stop_capture").catch(() => {});
 	teardownRunningUi();
-	reportError("Audio device", message);
+	reportError("Dispositivo de audio", message);
 }
 
 // "Measured for 02:34": how long the integrated measurement has been running.
@@ -867,10 +775,10 @@ function updateReadouts(m: Metrics) {
 	if (Number.isFinite(target) && m.integrated > LOUDNESS_FLOOR) {
 		const gain = target - m.integrated;
 		const sign = gain >= 0 ? "+" : "−";
-		deltaEl.innerHTML = `<span class="delta-label">Suggested gain</span> <strong>${sign}${Math.abs(gain).toFixed(1)} dB</strong>`;
+		deltaEl.innerHTML = `<span class="delta-label">Ganancia sugerida</span> <strong>${sign}${Math.abs(gain).toFixed(1)} dB</strong>`;
 		deltaEl.classList.toggle("hot", Math.abs(gain) > TARGET_TOLERANCE_LU);
 	} else {
-		deltaEl.innerHTML = `<span class="delta-label">Suggested gain</span> <strong>—</strong>`;
+		deltaEl.innerHTML = `<span class="delta-label">Ganancia sugerida</span> <strong>—</strong>`;
 		deltaEl.classList.remove("hot");
 	}
 }
@@ -975,7 +883,7 @@ function applyView() {
 	// The Reset hint is about settling the suggested gain; it goes with it.
 	document.body.classList.toggle("no-suggested-gain", !showSuggestedGain);
 	document.body.classList.toggle("compact", compact);
-	compactToggle.textContent = compact ? "Expand" : "Compact";
+	compactToggle.textContent = compact ? "Expandir" : "Compacta";
 	compactToggle.setAttribute("aria-pressed", String(compact));
 	resizeCanvas();
 	requestFrame();
@@ -1666,7 +1574,7 @@ function resetMeasurement() {
 	latchHoldGeneration = lastGeneration;
 	tpCard.classList.remove("clipping");
 	clipFlag.classList.remove("on");
-	invoke("reset_integrated").catch((e) => reportError("Reset measurement", e));
+	invoke("reset_integrated").catch((e) => reportError("Reiniciar medición", e));
 }
 
 // ---- Calibrated noise guide ------------------------------------------------
@@ -1720,7 +1628,7 @@ async function refreshGuide(rateOverride?: number) {
 		guideKind = "";
 		guideSelect.value = "";
 		guideCurve = null;
-		reportError("Load guide curve", e);
+		reportError("Cargar curva guía", e);
 	}
 	requestFrame();
 }
@@ -1816,11 +1724,6 @@ window.addEventListener("DOMContentLoaded", async () => {
 	stopBtn.addEventListener("click", () => void stop());
 	resetBtn.addEventListener("click", resetMeasurement);
 	hintDismiss.addEventListener("click", () => void markResetHintSeen());
-	updateCheckBtn.addEventListener("click", () => void checkForUpdates(true));
-	updateInstall.addEventListener("click", () => void installUpdate());
-	updateDismiss.addEventListener("click", () => {
-		updateBanner.hidden = true;
-	});
 
 	// About dialog: links open in the system browser (not the webview), and a
 	// backdrop click, the close button, or Escape dismisses it.
@@ -1913,8 +1816,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 	errorCopy.addEventListener("click", async () => {
 		try {
 			await navigator.clipboard.writeText(errorMessage.textContent ?? "");
-			errorCopy.textContent = "Copied";
-			setTimeout(() => (errorCopy.textContent = "Copy"), 1500);
+			errorCopy.textContent = "Copiado";
+			setTimeout(() => (errorCopy.textContent = "Copiar"), 1500);
 		} catch {
 			// Clipboard unavailable — the message is selectable in the banner.
 		}
@@ -2048,10 +1951,6 @@ window.addEventListener("DOMContentLoaded", async () => {
 		handleStreamError(event.payload);
 	});
 
-	// The macOS "Check for Updates…" menu item routes here so it shares the
-	// in-app button's flow (banner, "up to date"/error feedback).
-	await listen("menu-check-updates", () => void checkForUpdates(true));
-
 	// The macOS "About MeterMaid" menu item opens the in-app About dialog.
 	await listen("menu-about", () => showAbout());
 
@@ -2071,10 +1970,6 @@ window.addEventListener("DOMContentLoaded", async () => {
 	) {
 		await start();
 	}
-
-	// Quietly check for a newer release in the background. Non-blocking and
-	// failure-silent (see checkForUpdates); a found update raises the banner.
-	void checkForUpdates(false);
 
 	// Wait for the bundled fonts before the first draw so the canvas spectrum
 	// labels render in JetBrains Mono rather than briefly flashing a fallback.

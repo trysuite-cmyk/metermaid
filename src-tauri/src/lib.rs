@@ -46,8 +46,9 @@ fn start_capture(
             channels,
             reply,
         })
-        .map_err(|e| e.to_string())?;
-    rx.recv().map_err(|e| e.to_string())?
+        .map_err(|e| format!("No se pudo enviar la orden de inicio: {e}"))?;
+    rx.recv()
+        .map_err(|e| format!("No se recibió la respuesta de inicio: {e}"))?
 }
 
 #[tauri::command(async)]
@@ -56,13 +57,17 @@ fn stop_capture(state: State<AppState>) -> Result<(), String> {
     state
         .tx
         .send(Command::Stop { reply })
-        .map_err(|e| e.to_string())?;
-    rx.recv().map_err(|e| e.to_string())
+        .map_err(|e| format!("No se pudo enviar la orden de detención: {e}"))?;
+    rx.recv()
+        .map_err(|e| format!("No se recibió la respuesta de detención: {e}"))
 }
 
 #[tauri::command]
 fn reset_integrated(state: State<AppState>) -> Result<(), String> {
-    state.tx.send(Command::Reset).map_err(|e| e.to_string())
+    state
+        .tx
+        .send(Command::Reset)
+        .map_err(|e| format!("No se pudo reiniciar la medición: {e}"))
 }
 
 /// Whether this build links the ASIO SDK (x64 Windows only). The About dialog
@@ -79,7 +84,10 @@ fn asio_build() -> bool {
 /// Engine-free: it builds its own analyzer, so no engine round-trip is needed.
 #[tauri::command(async)]
 fn noise_reference(kind: String, sample_rate: u32) -> Result<NoiseReference, String> {
-    metermaid_dsp::noise_reference_curve(NoiseKind::parse(&kind)?, sample_rate)
+    let noise_kind =
+        NoiseKind::parse(&kind).map_err(|_| format!("Tipo de ruido desconocido: {kind}"))?;
+    metermaid_dsp::noise_reference_curve(noise_kind, sample_rate)
+        .map_err(|e| format!("No se pudo generar la curva guía: {e}"))
 }
 
 /// After `tauri-plugin-window-state` restores the saved geometry, make sure the
@@ -153,31 +161,25 @@ fn window_guard_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
         .build()
 }
 
-/// Build the desktop application menu, replacing Tauri's default. **About
-/// MeterMaid** and **Check for Updates…** are custom items that signal the
-/// frontend (via the `menu-about` / `menu-check-updates` events) — About opens
-/// an in-app dialog (centered, with clickable links) rather than the native
-/// panel, which can't be centered or hyperlinked.
+/// Build the desktop application menu, replacing Tauri's default. The custom
+/// **Acerca de MeterMaid** item signals the frontend through `menu-about` and
+/// opens the centered in-app dialog with clickable links.
 ///
 /// On macOS these live in the application menu (alongside the standard Edit and
 /// Window submenus). Windows and Linux have no app menu, so they get a window
-/// menu bar with a single **Help** submenu carrying the same two items.
+/// menu bar with a single **Ayuda** submenu carrying the same item.
 #[cfg(desktop)]
 fn build_app_menu<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
 ) -> tauri::Result<tauri::menu::Menu<R>> {
     use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 
-    let about = MenuItemBuilder::with_id("about", "About MeterMaid").build(app)?;
-    let check_updates =
-        MenuItemBuilder::with_id("check-for-updates", "Check for Updates…").build(app)?;
+    let about = MenuItemBuilder::with_id("about", "Acerca de MeterMaid").build(app)?;
 
     #[cfg(target_os = "macos")]
     {
         let app_menu = SubmenuBuilder::new(app, "MeterMaid")
             .item(&about)
-            .separator()
-            .item(&check_updates)
             .separator()
             .services()
             .separator()
@@ -188,7 +190,7 @@ fn build_app_menu<R: tauri::Runtime>(
             .quit()
             .build()?;
 
-        let edit_menu = SubmenuBuilder::new(app, "Edit")
+        let edit_menu = SubmenuBuilder::new(app, "Editar")
             .undo()
             .redo()
             .separator()
@@ -198,7 +200,7 @@ fn build_app_menu<R: tauri::Runtime>(
             .select_all()
             .build()?;
 
-        let window_menu = SubmenuBuilder::new(app, "Window")
+        let window_menu = SubmenuBuilder::new(app, "Ventana")
             .minimize()
             .maximize()
             .fullscreen()
@@ -213,10 +215,7 @@ fn build_app_menu<R: tauri::Runtime>(
 
     #[cfg(not(target_os = "macos"))]
     {
-        let help_menu = SubmenuBuilder::new(app, "Help")
-            .item(&about)
-            .item(&check_updates)
-            .build()?;
+        let help_menu = SubmenuBuilder::new(app, "Ayuda").item(&about).build()?;
 
         MenuBuilder::new(app).item(&help_menu).build()
     }
@@ -234,15 +233,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(window_guard_plugin());
 
-    // Desktop-only: the self-updater (`relaunch` after install comes from the
-    // process plugin above, registered on every platform) and the app menu. The
-    // menu is set here, before any window is created, so the Windows/Linux menu
-    // bar attaches to the window rather than missing the initial creation.
+    // Desktop-only application menu. It is set before any window is created so
+    // the Windows/Linux menu bar attaches to the initial window.
     #[cfg(desktop)]
     {
-        builder = builder
-            .plugin(tauri_plugin_updater::Builder::new().build())
-            .menu(build_app_menu);
+        builder = builder.menu(build_app_menu);
     }
 
     builder
@@ -258,16 +253,10 @@ pub fn run() {
             std::thread::spawn(move || audio::engine_loop(rx, handle));
             Ok(())
         })
-        .on_menu_event(|app, event| match event.id().as_ref() {
-            // "Check for Updates…" reuses the frontend's updater flow (same banner
-            // and feedback as the in-app button); "About" opens the in-app dialog.
-            "check-for-updates" => {
-                let _ = app.emit("menu-check-updates", ());
-            }
-            "about" => {
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == "about" {
                 let _ = app.emit("menu-about", ());
             }
-            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             list_devices,
@@ -279,5 +268,5 @@ pub fn run() {
             noise_reference
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .expect("error al ejecutar la aplicación Tauri");
 }

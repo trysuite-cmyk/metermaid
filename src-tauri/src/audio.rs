@@ -91,21 +91,21 @@ pub enum Command {
 /// valid 1- or 2-channel selection (mono or a stereo pair).
 fn validate_selection(sel: &[usize], device_channels: usize) -> Result<(), String> {
     if sel.is_empty() {
-        return Err("no channels selected".into());
+        return Err("no se seleccionaron canales".into());
     }
     if sel.len() > 2 {
         return Err(format!(
-            "too many channels selected ({}); meter 1 (mono) or 2 (stereo)",
+            "se seleccionaron demasiados canales ({}); elegí 1 (mono) o 2 (estéreo)",
             sel.len()
         ));
     }
     if sel.len() == 2 && sel[0] == sel[1] {
-        return Err("the two selected channels must be different".into());
+        return Err("los dos canales seleccionados deben ser diferentes".into());
     }
     if let Some(&mx) = sel.iter().max() {
         if mx >= device_channels {
             return Err(format!(
-                "channel {} out of range (device exposes {} channels)",
+                "el canal {} está fuera de rango (el dispositivo ofrece {} canales)",
                 mx + 1,
                 device_channels
             ));
@@ -120,16 +120,16 @@ fn validate_selection(sel: &[usize], device_channels: usize) -> Result<(), Strin
 /// exact place to grant access so the user can fix it without guessing.
 fn mic_permission_hint() -> &'static str {
     if cfg!(target_os = "macos") {
-        " If this is the first time starting capture, macOS may be blocking \
-microphone access — open System Settings → Privacy & Security → Microphone, \
-enable MeterMaid, then try again."
+        " Si es la primera vez que iniciás la captura, macOS puede estar bloqueando \
+el acceso al micrófono. Abrí Configuración del Sistema → Privacidad y seguridad → \
+Micrófono, habilitá MeterMaid y volvé a intentarlo."
     } else if cfg!(target_os = "windows") {
-        " Windows may be blocking microphone access — open Settings → Privacy & \
-security → Microphone, allow desktop apps to access the microphone, then try \
-again."
+        " Windows puede estar bloqueando el acceso al micrófono. Abrí Configuración → \
+Privacidad y seguridad → Micrófono, permití que las aplicaciones de escritorio accedan \
+al micrófono y volvé a intentarlo."
     } else {
-        " Your system may be blocking microphone access, or another application \
-may be using the device exclusively."
+        " El sistema puede estar bloqueando el acceso al micrófono o puede haber otra \
+aplicación usando el dispositivo de forma exclusiva."
     }
 }
 
@@ -139,13 +139,13 @@ fn explain_default_config_error(device: &str, err: cpal::Error) -> String {
     use cpal::ErrorKind::*;
     match err.kind() {
         DeviceNotAvailable | DeviceChanged => {
-            format!("“{device}” is no longer available. Reconnect it or pick another input device.")
+            format!("“{device}” ya no está disponible. Volvé a conectarlo o elegí otro dispositivo de entrada.")
         }
         UnsupportedConfig | UnsupportedOperation => {
-            format!("“{device}” doesn’t expose a capture format MeterMaid can read.")
+            format!("“{device}” no ofrece un formato de captura que MeterMaid pueda leer.")
         }
         _ => format!(
-            "Couldn’t read the audio settings for “{device}”: {err}.{}",
+            "No se pudieron leer los ajustes de audio de “{device}”: {err}.{}",
             mic_permission_hint()
         ),
     }
@@ -158,23 +158,23 @@ fn explain_build_error(device: &str, err: cpal::Error) -> String {
     use cpal::ErrorKind::*;
     match err.kind() {
         DeviceNotAvailable | DeviceChanged => {
-            format!("“{device}” is no longer available. Reconnect it or pick another input device.")
+            format!("“{device}” ya no está disponible. Volvé a conectarlo o elegí otro dispositivo de entrada.")
         }
         // ASIO drivers are exclusive-access: only one app may hold the device.
         DeviceBusy => format!(
-            "“{device}” is in use by another application. ASIO devices allow only one app at a \
-time — close the other app (such as a DAW) and try again."
+            "“{device}” está siendo usado por otra aplicación. Los dispositivos ASIO permiten una sola \
+aplicación a la vez; cerrá la otra aplicación, como el DAW, y volvé a intentarlo."
         ),
         UnsupportedConfig => format!(
-            "“{device}” doesn’t support the selected sample rate or channels. \
-Try a different sample rate."
+            "“{device}” no admite la frecuencia de muestreo o los canales seleccionados. \
+Probá con otra frecuencia de muestreo."
         ),
         InvalidInput => format!(
-            "MeterMaid requested invalid capture settings for “{device}”. \
-Try a different channel or sample-rate selection."
+            "MeterMaid solicitó ajustes de captura no válidos para “{device}”. \
+Probá otra selección de canales o frecuencia de muestreo."
         ),
         _ => format!(
-            "Couldn’t open “{device}” for capture: {err}.{}",
+            "No se pudo abrir “{device}” para capturar audio: {err}.{}",
             mic_permission_hint()
         ),
     }
@@ -186,10 +186,10 @@ fn explain_play_error(device: &str, err: cpal::Error) -> String {
     use cpal::ErrorKind::*;
     match err.kind() {
         DeviceNotAvailable | DeviceChanged => {
-            format!("“{device}” is no longer available. Reconnect it or pick another input device.")
+            format!("“{device}” ya no está disponible. Volvé a conectarlo o elegí otro dispositivo de entrada.")
         }
         _ => format!(
-            "Couldn’t start capture on “{device}”: {err}.{}",
+            "No se pudo iniciar la captura en “{device}”: {err}.{}",
             mic_permission_hint()
         ),
     }
@@ -199,18 +199,19 @@ fn explain_play_error(device: &str, err: cpal::Error) -> String {
 /// WASAPI as the default host, so ASIO is opened explicitly as a second host.
 #[cfg(all(windows, target_arch = "x86_64"))]
 fn asio_host() -> Result<cpal::Host, String> {
-    cpal::host_from_id(cpal::HostId::Asio).map_err(|e| format!("The ASIO host is unavailable: {e}"))
+    cpal::host_from_id(cpal::HostId::Asio)
+        .map_err(|e| format!("El controlador ASIO no está disponible: {e}"))
 }
 
 /// Find an input device by its raw name within a specific host.
 fn find_in_host(host: &cpal::Host, name: &str) -> Result<cpal::Device, String> {
     host.input_devices()
-        .map_err(|e| format!("Couldn’t list input devices: {e}"))?
+        .map_err(|e| format!("No se pudieron listar los dispositivos de entrada: {e}"))?
         .find(|d| d.to_string() == name)
         .ok_or_else(|| {
             format!(
-                "Input device “{name}” wasn’t found. It may have been disconnected — \
-pick another device from the list."
+                "No se encontró el dispositivo de entrada “{name}”. Puede haberse desconectado; \
+elegí otro dispositivo de la lista."
             )
         })
 }
@@ -222,7 +223,7 @@ pick another device from the list."
 fn find_device(id: &Option<String>) -> Result<cpal::Device, String> {
     let Some(id) = id else {
         return cpal::default_host().default_input_device().ok_or_else(|| {
-            "No input device found. Connect a microphone or audio interface and try again."
+            "No se encontró ningún dispositivo de entrada. Conectá un micrófono o una interfaz de audio y volvé a intentarlo."
                 .to_string()
         });
     };
@@ -241,7 +242,10 @@ pub fn list_input_devices(include_asio: bool) -> Result<Vec<DeviceInfo>, String>
     let host = cpal::default_host();
     let default_name = host.default_input_device().map(|d| d.to_string());
     let mut out = Vec::new();
-    for device in host.input_devices().map_err(|e| e.to_string())? {
+    for device in host
+        .input_devices()
+        .map_err(|e| format!("No se pudieron listar los dispositivos de entrada: {e}"))?
+    {
         let name = device.to_string();
         let is_default = Some(&name) == default_name.as_ref();
         out.push(DeviceInfo {
@@ -406,7 +410,7 @@ fn build_silent_output(
         ),
         other => {
             return Err(format!(
-                "“{dev_name}” uses an ASIO output format MeterMaid can’t drive ({other:?})."
+                "“{dev_name}” usa un formato de salida ASIO que MeterMaid no puede controlar ({other:?})."
             ))
         }
     }
@@ -536,7 +540,7 @@ fn build_stream(
     let on_error = move |err: cpal::Error| {
         eprintln!("audio stream error: {err}");
         if is_fatal_stream_error(err.kind()) {
-            let _ = err_app.emit("stream-error", err.to_string());
+            let _ = err_app.emit("stream-error", format!("Error del flujo de audio: {err}"));
         }
     };
 
@@ -610,7 +614,7 @@ fn build_stream(
         // meaningful per-sample conversion.
         other => {
             return Err(format!(
-                "“{dev_name}” uses an audio format MeterMaid can’t read ({other:?})."
+                "“{dev_name}” usa un formato de audio que MeterMaid no puede leer ({other:?})."
             ))
         }
     }
@@ -798,22 +802,19 @@ mod tests {
             cpal::Error::new(cpal::ErrorKind::DeviceNotAvailable),
         );
         assert!(msg.contains("Scarlett 2i2"), "got: {msg}");
-        assert!(msg.contains("no longer available"), "got: {msg}");
+        assert!(msg.contains("ya no está disponible"), "got: {msg}");
 
         // An unsupported config points at the sample rate.
         let msg = explain_build_error(
             "Built-in Mic",
             cpal::Error::new(cpal::ErrorKind::UnsupportedConfig),
         );
-        assert!(msg.contains("sample rate"), "got: {msg}");
+        assert!(msg.contains("frecuencia de muestreo"), "got: {msg}");
 
         // A device held exclusively (ASIO) names the conflict.
         let msg = explain_build_error("Helix", cpal::Error::new(cpal::ErrorKind::DeviceBusy));
         assert!(msg.contains("Helix"), "got: {msg}");
-        assert!(
-            msg.to_lowercase().contains("another application"),
-            "got: {msg}"
-        );
+        assert!(msg.to_lowercase().contains("otra aplicación"), "got: {msg}");
 
         // Opaque backend failures (where denied mic permission lands) carry the
         // permission hint.
@@ -821,7 +822,7 @@ mod tests {
             cpal::Error::with_message(cpal::ErrorKind::BackendError, "kAudioUnitErr_NoConnection");
         let msg = explain_build_error("Built-in Mic", backend);
         assert!(msg.contains("Built-in Mic"), "got: {msg}");
-        assert!(msg.to_lowercase().contains("microphone"), "got: {msg}");
+        assert!(msg.to_lowercase().contains("micrófono"), "got: {msg}");
     }
 
     #[test]
@@ -829,7 +830,7 @@ mod tests {
         let backend = cpal::Error::with_message(cpal::ErrorKind::BackendError, "denied");
         let msg = explain_play_error("Mic", backend);
         assert!(msg.contains("Mic"), "got: {msg}");
-        assert!(msg.to_lowercase().contains("microphone"), "got: {msg}");
+        assert!(msg.to_lowercase().contains("micrófono"), "got: {msg}");
     }
 
     // --- Channel selection --------------------------------------------------
@@ -838,10 +839,10 @@ mod tests {
     fn validate_selection_rejects_empty_and_out_of_range() {
         assert!(validate_selection(&[], 2)
             .unwrap_err()
-            .contains("no channels"));
+            .contains("no se seleccionaron canales"));
         let err = validate_selection(&[2], 2).unwrap_err();
-        assert!(err.contains("out of range"), "got: {err}");
-        assert!(err.contains("channel 3"), "1-based label, got: {err}");
+        assert!(err.contains("fuera de rango"), "got: {err}");
+        assert!(err.contains("canal 3"), "1-based label, got: {err}");
         assert!(validate_selection(&[0, 1], 2).is_ok());
     }
 
@@ -850,11 +851,11 @@ mod tests {
         // More than a stereo pair is not a valid selection.
         assert!(validate_selection(&[0, 1, 2], 4)
             .unwrap_err()
-            .contains("too many"));
+            .contains("demasiados"));
         // A "stereo" pair pointing at the same channel is rejected.
         assert!(validate_selection(&[1, 1], 2)
             .unwrap_err()
-            .contains("different"));
+            .contains("diferentes"));
     }
 
     // --- Drain chunking ------------------------------------------------------

@@ -27,7 +27,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -37,14 +37,6 @@
     ],
     "macOS": {
       "entitlements": "Entitlements.plist"
-    }
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVFNjRFODhFNkM2MENFNDEKUldSQnptQnNqdWhrWHF4d3lWb283WUtsdkZMazM4MkphSGdGQ1BTTWRZVWNGWHVTQUoxMFJUdXEK",
-      "endpoints": [
-        "https://github.com/reverentgeek/metermaid/releases/latest/download/latest.json"
-      ]
     }
   }
 }
