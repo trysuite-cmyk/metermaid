@@ -12,6 +12,10 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      - name: Conservar finales de línea del repositorio
+        shell: pwsh
+        run: git config --global core.autocrlf false
+
       - name: Descargar el código
         uses: actions/checkout@v6
 
